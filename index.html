@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<!-- APP-VERSION:2026-04-10T16:00:00 -->
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -908,11 +912,21 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 
           <!-- Code ERP + MP -->
           <div class="r2">
-            <div class="fg">
+            <div class="fg" style="position:relative">
               <div class="fg-lbl">Code ERP</div>
               <input class="fg-inp mono" id="rCode" type="text" placeholder="SLS0000001"
-                autocomplete="off" oninput="onRCodeInput()" onblur="onRCodeBlur()">
+                autocomplete="off"
+                oninput="onRCodeInput(); showERPDropdown()"
+                onblur="onRCodeBlur(); setTimeout(hideERPDropdown, 200)"
+                onfocus="showERPDropdown()">
               <div id="rCodeWarn" style="display:none;font-family:var(--fm);font-size:9px;margin-top:3px;color:var(--err)"></div>
+              <!-- Dropdown autocomplete ERP -->
+              <div id="erpDropdown" style="
+                display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;
+                background:var(--bg-panel);border:1px solid var(--ac-b);border-radius:var(--r8);
+                box-shadow:0 8px 24px rgba(30,45,100,.15);margin-top:2px;
+                max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch">
+              </div>
             </div>
             <div class="fg">
               <div class="fg-lbl">Matière Première (MP)</div>
@@ -5171,6 +5185,67 @@ function onRCodeBlur() {
   }
 }
 
+/* ── Autocomplete ERP dropdown dans réception ── */
+function showERPDropdown() {
+  const input = document.getElementById('rCode');
+  const dropdown = document.getElementById('erpDropdown');
+  if (!input || !dropdown || !erpDB.length) return;
+
+  const q = input.value.trim().toUpperCase();
+
+  // Filtrer : correspondance code OU nom, max 12 résultats
+  const results = erpDB
+    .filter(e => !q ||
+      e.code.toUpperCase().includes(q) ||
+      (e.nom || e.name || '').toUpperCase().includes(q)
+    )
+    .slice(0, 12);
+
+  if (!results.length) { hideERPDropdown(); return; }
+
+  dropdown.innerHTML = results.map(e => {
+    const code = e.code || '';
+    const nom  = e.nom || e.name || '';
+    const qHL  = q ? q : '';
+    // Surligner la partie correspondante dans le code
+    const codeHL = qHL && code.includes(qHL)
+      ? code.replace(qHL, '<mark style="background:var(--ac-s);color:var(--ac);border-radius:2px;padding:0 1px">'+qHL+'</mark>')
+      : code;
+
+    return '<div onclick="selectERPItem(\'' + code.replace(/'/g,"\\'") + '\',\'' + nom.replace(/'/g,"\\'") + '\')"' +
+      ' style="display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;' +
+        'border-bottom:1px solid var(--br-s);transition:background .1s"' +
+      ' onmouseover="this.style.background=\'var(--bg-hover)\'"' +
+      ' onmouseout="this.style.background=\'\'">' +
+      '<div style="flex-shrink:0;font-family:var(--fm);font-size:10px;font-weight:700;color:var(--ac);' +
+        'min-width:90px;letter-spacing:.5px">' + codeHL + '</div>' +
+      '<div style="flex:1;font-size:12px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + nom + '</div>' +
+    '</div>';
+  }).join('');
+
+  dropdown.style.display = '';
+}
+
+function hideERPDropdown() {
+  const d = document.getElementById('erpDropdown');
+  if (d) d.style.display = 'none';
+}
+
+function selectERPItem(code, nom) {
+  const codeEl = document.getElementById('rCode');
+  const mpEl   = document.getElementById('rMP');
+  if (codeEl) { codeEl.value = code; }
+  if (mpEl)   { mpEl.value  = nom; mpEl.style.color = 'var(--ok)'; }
+  hideERPDropdown();
+  // Déclencher les handlers habituels
+  onRCodeInput();
+  if (curAtel !== 'SS') onCodeERPChange();
+  // Focus sur le champ suivant
+  const brutEl = document.getElementById('rBrut');
+  if (brutEl) setTimeout(() => brutEl.focus(), 50);
+}
+
+
 /* Validation avant saveRec */
 function validateERPCode(code) {
   // Les codes pré-définis sont toujours valides
@@ -7499,32 +7574,31 @@ function showFDR(prod){
     const cls  = Math.abs(ep) <= 1 ? 'sp-ok' : Math.abs(ep) <= 3 ? 'sp-p' : 'sp-err';
     const sign = ec >= 0 ? '+' : '';
 
-    // Panachage : lots array avec 2+ entrées valides
+    // Détection panachage : lots array avec 2+ entrées valides
     const lotsArr = (i.lots && Array.isArray(i.lots) && i.lots.filter(l => l.lot).length > 1)
       ? i.lots.filter(l => l.lot)
       : null;
 
-    /* Cellule N° Lot — simple ou panachage */
+    // Cellule N° Lot MP — simple ou panachage détaillé
     const lotCell = lotsArr
-      ? /* panachage : badge titre + liste lot→qty */
-        '<td style="padding:6px 10px;font-family:var(--fm);font-size:9px">' +
-          '<div style="display:inline-flex;align-items:center;gap:4px;margin-bottom:4px;' +
-            'background:rgba(46,127,212,.1);border:1px solid rgba(46,127,212,.25);' +
-            'border-radius:3px;padding:1px 6px;color:var(--info);font-weight:700;font-size:8px;letter-spacing:.5px">' +
+      ? '<td style="padding:6px 10px;font-family:var(--fm);font-size:9px;vertical-align:top">' +
+          '<div style="display:inline-flex;align-items:center;gap:4px;margin-bottom:5px;' +
+            'background:rgba(46,127,212,.12);border:1px solid rgba(46,127,212,.3);' +
+            'border-radius:3px;padding:2px 7px;color:var(--info);font-weight:700;' +
+            'font-size:8px;letter-spacing:.5px;white-space:nowrap">' +
             '🔀 PANACHAGE · ' + lotsArr.length + ' lots' +
           '</div>' +
           lotsArr.map(l =>
-            '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;' +
-              'padding:2px 6px;margin-top:2px;background:var(--bg-panel);border:1px solid var(--br-s);' +
-              'border-radius:3px">' +
-              '<span style="color:var(--ok);font-weight:700;font-size:9px">' + l.lot + '</span>' +
-              '<span style="color:var(--t2);font-weight:700;font-size:9px;white-space:nowrap">' + (l.qty||0).toFixed(3) + ' kg</span>' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;' +
+              'padding:3px 7px;margin-top:2px;background:var(--bg-panel);' +
+              'border:1px solid var(--br-s);border-radius:4px;white-space:nowrap">' +
+              '<span style="color:var(--ok);font-weight:700;font-size:9px;font-family:var(--fm)">' + l.lot + '</span>' +
+              '<span style="color:var(--t1);font-weight:700;font-size:10px;font-family:var(--fm)">' + (l.qty||0).toFixed(3) + ' <span style="color:var(--t3);font-size:8px">kg</span></span>' +
             '</div>'
           ).join('') +
         '</td>'
-      : /* lot unique */
-        '<td style="padding:8px 10px;font-family:var(--fm);font-size:10px;color:var(--t2)">' +
-          (lotsArr === null && i.lots && i.lots.filter(l=>l.lot).length === 1
+      : '<td style="padding:8px 10px;font-family:var(--fm);font-size:10px;color:var(--t2)">' +
+          (i.lots && i.lots.filter(l=>l.lot).length === 1
             ? i.lots.filter(l=>l.lot)[0].lot
             : (i.lotMP || '—')) +
         '</td>';
@@ -7591,8 +7665,8 @@ function showFDR(prod){
     '</div>' : '') +
 
     '<div style="font-family:var(--fm);font-size:9px;letter-spacing:2px;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Matières premières consommées</div>' +
-    '<div style="background:var(--bg-card);border:1px solid var(--br-d);border-radius:var(--r8);overflow:hidden;margin-bottom:12px">' +
-      '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+    '<div style="background:var(--bg-card);border:1px solid var(--br-d);border-radius:var(--r8);overflow-x:auto;overflow-y:hidden;margin-bottom:12px;-webkit-overflow-scrolling:touch">' +
+      '<table style="width:100%;min-width:560px;border-collapse:collapse;font-size:12px">' +
         '<thead><tr style="background:var(--t1)">' +
           ['#','Code ERP','Matière Première','Qté Théo.','Qté Réelle','N° Lot MP','Écart'].map((h,i) =>
             '<th style="color:rgba(255,255,255,.6);font-family:var(--fm);font-size:8px;letter-spacing:1px;text-transform:uppercase;padding:8px 10px;font-weight:500;text-align:'+(i>=3&&i!==5?'right':'left')+'">'+h+'</th>'
@@ -9790,6 +9864,53 @@ async function deleteUser(id, code, name) {
   }
 }
 
+</script>
+
+<!-- ═══ AUTO-UPDATE — Détection de nouvelle version sur GitHub ═══ -->
+<script>
+(function(){
+  function getEmbeddedVersion(){
+    const m = document.documentElement.innerHTML.match(/APP-VERSION:([\d\-T:]+)/);
+    return m ? m[1] : null;
+  }
+  async function checkForUpdate(){
+    try{
+      const url = location.href.split('?')[0].split('#')[0];
+      const res = await fetch(url + '?_=' + Date.now(), { cache:'no-store', headers:{'Cache-Control':'no-cache'} });
+      if(!res.ok) return;
+      const html = await res.text();
+      const rm = html.match(/APP-VERSION:([\d\-T:]+)/);
+      if(!rm) return;
+      if(getEmbeddedVersion() && rm[1] !== getEmbeddedVersion()) showUpdateBanner(rm[1]);
+    }catch(e){}
+  }
+  function showUpdateBanner(ver){
+    if(document.getElementById('_upd8Banner')) return;
+    const b = document.createElement('div');
+    b.id = '_upd8Banner';
+    b.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:99999;' +
+      'background:#1a2240;color:#fff;border:1px solid rgba(217,107,40,.6);border-radius:12px;' +
+      'padding:12px 16px;display:flex;align-items:center;gap:12px;' +
+      'box-shadow:0 8px 32px rgba(0,0,0,.35);font-family:IBM Plex Sans,sans-serif;font-size:13px;' +
+      'max-width:calc(100vw - 32px);animation:fadeUp .3s ease both';
+    b.innerHTML =
+      '<span style="font-size:20px;flex-shrink:0">🔄</span>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-weight:700;margin-bottom:2px">Mise à jour disponible</div>' +
+        '<div style="font-family:IBM Plex Mono,monospace;font-size:9px;color:rgba(255,255,255,.45)">' + ver.replace('T',' ').slice(0,16) + '</div>' +
+      '</div>' +
+      '<button onclick="location.reload(true)" style="background:#d96b28;border:none;border-radius:8px;' +
+        'color:#fff;font-family:IBM Plex Sans,sans-serif;font-size:12px;font-weight:700;' +
+        'padding:8px 16px;cursor:pointer;white-space:nowrap;flex-shrink:0">Mettre à jour</button>' +
+      '<button onclick="this.parentElement.remove()" style="background:transparent;' +
+        'border:1px solid rgba(255,255,255,.2);border-radius:6px;color:rgba(255,255,255,.5);' +
+        'font-size:14px;padding:4px 9px;cursor:pointer;flex-shrink:0">✕</button>';
+    document.body.appendChild(b);
+  }
+  setTimeout(checkForUpdate, 10000);
+  setInterval(checkForUpdate, 5*60000);
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState==='visible') checkForUpdate(); });
+})();
 </script>
 
 </body>
